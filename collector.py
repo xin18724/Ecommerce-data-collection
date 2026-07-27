@@ -1,16 +1,35 @@
 import requests
 import pandas as pd
 import time
+import execjs
 from config import COOKIES, PARAMS
+
+
+def generate_mars_cid():
+    """
+    通过执行 JS 文件动态生成 mars_cid
+    """
+    with open("encryptCid.js", "r", encoding="utf-8") as f:
+        js_code = f.read()
+    
+    ctx = execjs.compile(js_code)
+    
+    # 生成32位随机字符串
+    rand_str = ctx.call("Mar.Random.rand", 32)
+    
+    # 当前时间戳
+    timestamp = str(int(time.time() * 1000))
+    
+    # 拼接并加密
+    raw_cid = f"{timestamp}_{rand_str}"
+    mars_cid = ctx.call("Mar.Util.encryptCid", raw_cid)
+    
+    return mars_cid
 
 
 def get_product_ids(keyword, max_pages=10, batch_size=120):
     """
     获取商品 ID 列表，支持分页获取
-    :param keyword: 搜索关键词
-    :param max_pages: 要爬取的页数
-    :param batch_size: 每页返回的商品数量
-    :return: 商品 ID 列表
     """
     url = "https://mapi-pc.vip.com/vips-mobile/rest/shopping/pc/search/product/rank"
     headers = {
@@ -30,6 +49,9 @@ def get_product_ids(keyword, max_pages=10, batch_size=120):
     for page in range(max_pages):
         page_offset = page * batch_size
 
+        # 动态生成 mars_cid
+        mars_cid = generate_mars_cid()
+
         params = {
             "app_name": "shop_pc",
             "app_version": "4.0",
@@ -40,7 +62,7 @@ def get_product_ids(keyword, max_pages=10, batch_size=120):
             "province_id": "105101",
             "api_key": PARAMS.get("api_key", ""),
             "user_id": "111693749",
-            "mars_cid": "1736251449066_c8f4870a8ac51d14562510f72d3ee86d",
+            "mars_cid": mars_cid,
             "standby_id": "nature",
             "keyword": keyword,
             "sort": "0",
@@ -48,7 +70,7 @@ def get_product_ids(keyword, max_pages=10, batch_size=120):
             "batchSize": str(batch_size),
             "channelId": "1",
             "gPlatform": "PC",
-            "_": "1736849594426"
+            "_": str(int(time.time() * 1000))
         }
 
         response = requests.get(url, params=params, headers=headers, cookies=COOKIES)
@@ -66,7 +88,6 @@ def get_product_ids(keyword, max_pages=10, batch_size=120):
         product_ids.extend([i["pid"] for i in products])
         print(f"已获取第 {page + 1} 页商品数据，共 {len(products)} 个商品")
 
-        # 请求间隔，避免频率过高
         time.sleep(0.5)
 
     return product_ids
@@ -75,8 +96,6 @@ def get_product_ids(keyword, max_pages=10, batch_size=120):
 def get_product_details(product_ids, keyword=""):
     """
     根据商品 ID 列表批量获取商品详情
-    :param product_ids: 商品 ID 列表
-    :param keyword: 搜索关键词，用于生成文件名
     """
     url = "https://mapi-pc.vip.com/vips-mobile/rest/shopping/pc/product/module/list/v2"
     headers = {
@@ -93,12 +112,15 @@ def get_product_details(product_ids, keyword=""):
 
     flattened_data_list = []
 
-    # 每次请求最多 50 个商品 ID
     batch_size = 50
     batches = [product_ids[i:i + batch_size] for i in range(0, len(product_ids), batch_size)]
 
     for idx, batch in enumerate(batches):
         product_ids_str = ",".join(map(str, batch))
+
+        # 动态生成 mars_cid
+        mars_cid = generate_mars_cid()
+
         params = {
             "app_name": "shop_pc",
             "app_version": "4.0",
@@ -106,13 +128,13 @@ def get_product_details(product_ids, keyword=""):
             "province_id": "105101",
             "api_key": PARAMS.get("api_key", ""),
             "user_id": "111693749",
-            "mars_cid": "1736251449066_c8f4870a8ac51d14562510f72d3ee86d",
+            "mars_cid": mars_cid,
             "wap_consumer": "c",
             "is_default_area": "1",
             "productIds": product_ids_str,
             "scene": "search",
             "standby_id": "nature",
-            "_": "1736848998583"
+            "_": str(int(time.time() * 1000))
         }
 
         response = requests.get(url, params=params, headers=headers, cookies=COOKIES)
@@ -141,10 +163,8 @@ def get_product_details(product_ids, keyword=""):
 
         print(f"已获取第 {idx + 1}/{len(batches)} 批商品详情，共 {len(products)} 个商品")
 
-        # 请求间隔，避免频率过高
         time.sleep(0.5)
 
-    # 保存为 CSV 文件，文件名包含关键词和时间
     if flattened_data_list:
         df = pd.DataFrame(flattened_data_list)
         filename = f"product_details_{keyword}_{time.strftime('%Y%m%d_%H%M%S')}.csv"
@@ -155,13 +175,11 @@ def get_product_details(product_ids, keyword=""):
 
 
 def main():
-    """主函数"""
     keyword = "雪地靴"
     max_pages = 5
 
     print(f"开始采集关键词为 '{keyword}' 的商品数据...")
 
-    # 步骤1：获取商品ID列表
     product_ids = get_product_ids(keyword=keyword, max_pages=max_pages)
     print(f"获取到 {len(product_ids)} 个商品 ID")
 
@@ -169,7 +187,6 @@ def main():
         print("未获取到商品ID，程序结束")
         return
 
-    # 步骤2：获取商品详情
     get_product_details(product_ids, keyword=keyword)
 
     print("采集完成！")
